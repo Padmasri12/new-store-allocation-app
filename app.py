@@ -48,52 +48,82 @@ if st.button("Run Allocation"):
 
     allocation_list = []
 
-    for store in dc_df["Store"].unique():
+for store in dc_df["Store"].unique():
 
-        store_dc = dc_df[dc_df["Store"] == store]
+    store_dc_data = dc_df[dc_df["Store"] == store]
+
+    for _, dc_row in store_dc_data.iterrows():
+
+        dept = dc_row["Dept"]
+        subdept = dc_row["SubDept"]
+        clas = dc_row["Class"]
+        subclass = dc_row["SubClass"]
+        mc = dc_row["MC"]
+
+        dc_value = dc_row["DisplayCapacity"]
+
+        # Get size curve for this full hierarchy
+        hierarchy_curve = curve_df[
+            (curve_df["Dept"] == dept) &
+            (curve_df["SubDept"] == subdept) &
+            (curve_df["Class"] == clas) &
+            (curve_df["SubClass"] == subclass) &
+            (curve_df["MC"] == mc)
+        ]
+
+        total_curve = hierarchy_curve["CurveQty"].sum()
+
+        if total_curve == 0:
+            continue
+
+        # Get eligible styles under this hierarchy
+        eligible_styles = eligible_data[
+            (eligible_data["Dept"] == dept) &
+            (eligible_data["SubDept"] == subdept) &
+            (eligible_data["Class"] == clas) &
+            (eligible_data["SubClass"] == subclass) &
+            (eligible_data["MC"] == mc)
+        ]["Style"].unique()
 
         for style in eligible_styles:
 
+            # Stop if DC exhausted
+            if dc_value < total_curve:
+                break
+
             style_data = eligible_data[
-                eligible_data["Style"] == style
+                (eligible_data["Style"] == style) &
+                (eligible_data["Dept"] == dept) &
+                (eligible_data["SubDept"] == subdept) &
+                (eligible_data["Class"] == clas) &
+                (eligible_data["SubClass"] == subclass) &
+                (eligible_data["MC"] == mc)
             ]
 
-            if style_data.empty:
-                continue
-
-            mc = style_data["MC"].iloc[0]
-
-            dc_value = store_dc[
-                store_dc["MC"] == mc
-            ]["DisplayCapacity"].sum()
-
             style_data = style_data.merge(
-                curve_df,
+                hierarchy_curve,
                 on=["Dept","SubDept","Class","SubClass","MC","Size"],
                 how="left"
             )
 
-            total_curve = style_data["CurveQty"].sum()
-
-            if total_curve == 0:
-                continue
-
-            full_sets = int(dc_value / total_curve)
-
+            # Allocate ONLY curve qty (no multiply)
             for _, row in style_data.iterrows():
-
-                alloc_qty = min(
-                    full_sets * row["CurveQty"],
-                    row["WH_Qty"]
-                )
 
                 allocation_list.append({
                     "Store": store,
+                    "Dept": dept,
+                    "SubDept": subdept,
+                    "Class": clas,
+                    "SubClass": subclass,
+                    "MC": mc,
                     "Style": style,
                     "EAN": row["EAN"],
                     "Size": row["Size"],
-                    "AllocatedQty": alloc_qty
+                    "AllocatedQty": row["CurveQty"]
                 })
+
+            # Reduce DC after one full curve set
+            dc_value -= total_curve
 
     result = pd.DataFrame(allocation_list)
 
